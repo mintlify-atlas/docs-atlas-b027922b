@@ -1,0 +1,223 @@
+---
+title: Environment Variables
+description: Configure your Shopify RSS Feed to Google Chat service with required environment variables
+icon: gear
+---
+
+## Overview
+
+The Shopify RSS Feed to Google Chat service requires specific environment variables to function correctly. These variables control how the service connects to your Google Chat webhook and processes RSS feed updates.
+
+<Warning>
+  Environment variables contain sensitive credentials. Never commit them to version control or expose them publicly.
+</Warning>
+
+## Required Variables
+
+### WEBHOOK_URL
+
+<ParamField path="WEBHOOK_URL" type="string" required>
+  The Google Chat webhook URL where RSS feed updates will be sent.
+  
+  This variable is used in `rss-handler.ts:118` to deliver formatted changelog cards to your Google Chat space.
+
+  <Warning>
+    The service will throw an error if this variable is not set:
+    ```
+    WEBHOOK_URL environment variable is not set
+    ```
+  </Warning>
+
+  **How to obtain:**
+  
+  <Steps>
+    <Step title="Open Google Chat">
+      Navigate to the Google Chat space where you want to receive Shopify changelog updates.
+    </Step>
+    
+    <Step title="Configure Webhooks">
+      Click on the space name → **Apps & integrations** → **Add webhooks**.
+    </Step>
+    
+    <Step title="Create Webhook">
+      1. Enter a name (e.g., "Shopify Changelog")
+      2. Optionally add an avatar URL
+      3. Click **Save**
+    </Step>
+    
+    <Step title="Copy Webhook URL">
+      Copy the generated webhook URL. It will look like:
+      ```
+      https://chat.googleapis.com/v1/spaces/SPACE_ID/messages?key=KEY&token=TOKEN
+      ```
+    </Step>
+  </Steps>
+
+  **Example:**
+  ```bash
+  WEBHOOK_URL=https://chat.googleapis.com/v1/spaces/AAAAxxxxx/messages?key=AIzaxxxxx&token=xxxxx
+  ```
+
+  **Security Best Practices:**
+  
+  <Note>
+    - Store this value securely in your deployment platform's environment configuration
+    - Never log or expose the webhook URL in error messages or debugging output
+    - Rotate the webhook periodically by creating a new one in Google Chat
+    - Use secrets management for production deployments
+  </Note>
+</ParamField>
+
+## Configuration Details
+
+### RSS Feed Source
+
+The service automatically fetches updates from:
+```
+https://shopify.dev/changelog/feed.xml
+```
+
+This is hardcoded in `rss-handler.ts:4` and does not require configuration.
+
+### Update Processing
+
+The service processes updates based on the following logic:
+
+- **First Run:** Processes all items published since yesterday (midnight)
+- **Subsequent Runs:** Processes items newer than the last processed date
+- **Filtering:** Only items with both `title` and `link` are sent to Google Chat
+
+From `rss-handler.ts:40-63`:
+```typescript
+async function filterNewItems(feed) {
+  const state = await getProcessedState();
+  const lastProcessedDate = new Date(state.lastProcessedDate);
+
+  // Filter items that are newer than the last processed date
+  const newItems = feed.items.filter((item) => {
+    const itemDate = item.isoDate || item.pubDate;
+    if (!itemDate) return false;
+
+    const itemDateObj = new Date(itemDate);
+    return itemDateObj > lastProcessedDate;
+  });
+
+  // Sort by date (newest first)
+  newItems.sort((a, b) => {
+    const dateA = new Date(a.isoDate || a.pubDate || 0).getTime();
+    const dateB = new Date(b.isoDate || b.pubDate || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return newItems;
+}
+```
+
+## Local Development
+
+For local testing with Bun:
+
+<Steps>
+  <Step title="Create .env file">
+    Create a `.env` file in your project root:
+    ```bash
+    WEBHOOK_URL=your_webhook_url_here
+    ```
+    
+    <Note>
+      Bun automatically loads `.env` files without requiring additional packages like `dotenv`.
+    </Note>
+  </Step>
+  
+  <Step title="Run the service">
+    ```bash
+    bun run dev
+    ```
+  </Step>
+  
+  <Step title="Test manually">
+    Trigger the RSS check endpoint:
+    ```bash
+    curl http://localhost:3000/get-rss-feed
+    ```
+  </Step>
+</Steps>
+
+## Production Deployment
+
+For production deployments on Vercel:
+
+1. Navigate to your project in Vercel Dashboard
+2. Go to **Settings** → **Environment Variables**
+3. Add `WEBHOOK_URL` with your Google Chat webhook URL
+4. Select the appropriate environments (Production, Preview, Development)
+5. Click **Save**
+
+<Warning>
+  Redeploy your application after adding environment variables for the changes to take effect.
+</Warning>
+
+## Verification
+
+To verify your environment variables are configured correctly:
+
+<Steps>
+  <Step title="Check deployment logs">
+    Monitor your deployment logs for successful webhook delivery messages:
+    ```
+    Successfully sent X update(s) to Google Chat
+    ```
+  </Step>
+  
+  <Step title="Test the endpoint">
+    For Vercel deployments, the cron job automatically triggers `/get-rss-feed` daily at midnight UTC.
+    
+    You can manually trigger it by visiting:
+    ```
+    https://your-deployment.vercel.app/get-rss-feed
+    ```
+  </Step>
+  
+  <Step title="Verify Google Chat">
+    Check your Google Chat space for incoming Shopify changelog update cards.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Error: WEBHOOK_URL environment variable is not set
+
+**Cause:** The `WEBHOOK_URL` variable is missing or not loaded properly.
+
+**Solution:**
+- Verify the variable is set in your deployment platform
+- For local development, ensure `.env` file exists in project root
+- Redeploy after adding environment variables
+
+### Error: Failed to send to Gchat
+
+**Cause:** Invalid webhook URL or network connectivity issues.
+
+**Solution:**
+- Verify the webhook URL is correct and hasn't been revoked
+- Test the webhook URL manually with a curl command:
+  ```bash
+  curl -X POST "YOUR_WEBHOOK_URL" \
+    -H "Content-Type: application/json" \
+    -d '{"text": "Test message"}'
+  ```
+- Check if the Google Chat webhook still exists in your space settings
+
+### No updates received
+
+**Cause:** No new RSS feed items, or filtering excluded all items.
+
+**Solution:**
+- Check deployment logs for the message:
+  ```
+  No new items to process
+  ```
+- Verify the Shopify changelog feed is accessible:
+  ```bash
+  curl https://shopify.dev/changelog/feed.xml
+  ```

@@ -1,0 +1,554 @@
+---
+title: 'RSS Handler Functions'
+description: 'Core functions for RSS feed processing and Google Chat integration'
+---
+
+## Overview
+
+The `rss-handler.ts` module contains the core business logic for fetching, filtering, and sending Shopify changelog updates to Google Chat.
+
+---
+
+## handleRSSFeed()
+
+Main orchestrator function that coordinates the entire RSS feed processing workflow.
+
+### Signature
+
+```typescript
+export async function handleRSSFeed(): Promise<void>
+```
+
+### Description
+
+Orchestrates the complete workflow:
+1. Fetches the RSS feed
+2. Filters for new items
+3. Sends new items to Google Chat (if any)
+4. Updates the processed state
+
+### Parameters
+
+None
+
+### Return Value
+
+<ResponseField name="return" type="Promise<void>">
+  Returns a promise that resolves when processing completes
+</ResponseField>
+
+### Behavior
+
+- If new items exist: sends to Google Chat and updates state
+- If no new items: logs "No new items to process" and returns
+
+### Source Code
+
+```typescript rss-handler.ts (lines 24-34)
+export async function handleRSSFeed() {
+  const feed = await getRSSFeed();
+  const newItems = await filterNewItems(feed);
+
+  if (newItems.length > 0) {
+    await sendToGchat(newItems);
+    await updateProcessedState(newItems);
+  } else {
+    console.log("No new items to process");
+  }
+}
+```
+
+### Example Usage
+
+```typescript
+import { handleRSSFeed } from './rss-handler.js';
+
+// Process RSS feed
+await handleRSSFeed();
+// Console: "Successfully sent 3 update(s) to Google Chat"
+```
+
+---
+
+## getRSSFeed()
+
+Fetches and parses the Shopify changelog RSS feed.
+
+### Signature
+
+```typescript
+async function getRSSFeed(): Promise<Parser.Output<any>>
+```
+
+### Description
+
+Uses the [rss-parser](https://www.npmjs.com/package/rss-parser) library to fetch and parse the RSS feed from `https://shopify.dev/changelog/feed.xml`.
+
+### Parameters
+
+None
+
+### Return Value
+
+<ResponseField name="return" type="Promise<Parser.Output>">
+  Parsed RSS feed object containing items array and metadata
+</ResponseField>
+
+<Accordion title="Feed Structure">
+
+```typescript
+interface FeedOutput {
+  items: Array<{
+    title?: string;
+    link?: string;
+    pubDate?: string;
+    isoDate?: string;
+    content?: string;
+    // ... other RSS fields
+  }>;
+  // ... feed metadata
+}
+```
+
+</Accordion>
+
+### Source Code
+
+```typescript rss-handler.ts (lines 1-4, 36-38)
+import Parser from "rss-parser";
+
+const parser = new Parser();
+const RSS_FEED_URL = "https://shopify.dev/changelog/feed.xml";
+
+// ...
+
+async function getRSSFeed() {
+  return await parser.parseURL(RSS_FEED_URL);
+}
+```
+
+### Example Usage
+
+```typescript
+const feed = await getRSSFeed();
+console.log(`Found ${feed.items.length} total items in feed`);
+```
+
+---
+
+## filterNewItems()
+
+Filters RSS feed items to return only items newer than the last processed date.
+
+### Signature
+
+```typescript
+async function filterNewItems(
+  feed: Awaited<ReturnType<typeof getRSSFeed>>
+): Promise<typeof feed.items>
+```
+
+### Description
+
+Compares each RSS item's publication date against the last processed date and returns items that are newer. Items are sorted by date (newest first).
+
+### Parameters
+
+<ParamField name="feed" type="Parser.Output" required>
+  The parsed RSS feed object from `getRSSFeed()`
+</ParamField>
+
+### Return Value
+
+<ResponseField name="return" type="Promise<Array<FeedItem>>">
+  Array of new feed items, sorted by date (newest first)
+</ResponseField>
+
+### Filtering Logic
+
+1. Retrieves last processed date (defaults to yesterday at 00:00:00)
+2. Filters items where `isoDate` or `pubDate` is **after** the last processed date
+3. Sorts results by date (newest first)
+4. Returns filtered and sorted array
+
+### Source Code
+
+```typescript rss-handler.ts (lines 40-64)
+async function filterNewItems(
+  feed: Awaited<ReturnType<typeof getRSSFeed>>
+): Promise<typeof feed.items> {
+  const state = await getProcessedState();
+  const lastProcessedDate = new Date(state.lastProcessedDate);
+
+  // Filter items that are newer than the last processed date
+  const newItems = feed.items.filter((item) => {
+    const itemDate = item.isoDate || item.pubDate;
+    if (!itemDate) return false;
+
+    const itemDateObj = new Date(itemDate);
+    // Include items that are after the last processed date
+    return itemDateObj > lastProcessedDate;
+  });
+
+  // Sort by date (newest first)
+  newItems.sort((a, b) => {
+    const dateA = new Date(a.isoDate || a.pubDate || 0).getTime();
+    const dateB = new Date(b.isoDate || b.pubDate || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return newItems;
+}
+```
+
+### Example Usage
+
+```typescript
+const feed = await getRSSFeed();
+const newItems = await filterNewItems(feed);
+
+if (newItems.length > 0) {
+  console.log(`Found ${newItems.length} new items`);
+  console.log(`Latest: ${newItems[0].title}`);
+}
+```
+
+---
+
+## sendToGchat()
+
+Sends RSS feed items to Google Chat using a webhook with formatted card messages.
+
+### Signature
+
+```typescript
+async function sendToGchat(
+  items: Awaited<ReturnType<typeof getRSSFeed>>["items"]
+): Promise<void>
+```
+
+### Description
+
+Formats RSS items into a Google Chat card message and sends via webhook. Creates a rich card with header, item list, and action buttons.
+
+### Parameters
+
+<ParamField name="items" type="Array<FeedItem>" required>
+  Array of RSS feed items to send
+</ParamField>
+
+### Return Value
+
+<ResponseField name="return" type="Promise<void>">
+  Returns a promise that resolves when the message is successfully sent
+</ResponseField>
+
+### Environment Variables
+
+<ParamField name="WEBHOOK_URL" type="string" required>
+  Google Chat webhook URL. Required - function throws if not set.
+</ParamField>
+
+### Error Handling
+
+<Accordion title="Error Scenarios">
+
+**Missing Webhook URL**
+```typescript
+Error: WEBHOOK_URL environment variable is not set
+```
+
+**Failed Webhook Request**
+```typescript
+Error: Failed to send to Gchat: {statusText} - {errorText}
+```
+
+**Validation**
+- Items without `title` and `link` are filtered out
+- If no valid items remain after filtering, logs "No valid items to send" and returns
+- If items array is empty, logs "No items to send" and returns
+
+</Accordion>
+
+### Message Format
+
+Creates a Google Chat card with:
+
+1. **Header**: "Shopify Changelog Updates" with Shopify logo
+2. **Subtitle**: Count of updates and latest date
+3. **Item List**: Each item as a decorated text widget with:
+   - Bookmark icon
+   - Clickable title (bold)
+   - Formatted publication date (gray text)
+4. **Action Button**: "View All Changelogs" linking to Shopify changelog
+
+### Source Code
+
+```typescript rss-handler.ts (lines 115-227)
+async function sendToGchat(
+  items: Awaited<ReturnType<typeof getRSSFeed>>["items"]
+) {
+  const webhookUrl = process.env.WEBHOOK_URL;
+  if (!webhookUrl) {
+    throw new Error("WEBHOOK_URL environment variable is not set");
+  }
+
+  if (items.length === 0) {
+    console.log("No items to send");
+    return;
+  }
+
+  try {
+    // Filter out items without title or link
+    const validItems = items.filter((item) => item.title && item.link);
+
+    if (validItems.length === 0) {
+      console.log("No valid items to send");
+      return;
+    }
+
+    // Get the most recent date for the subtitle
+    const mostRecentDate = validItems[0]?.isoDate || validItems[0]?.pubDate;
+    const formattedDate = formatDate(mostRecentDate);
+    const dateSubtitle = `${validItems.length} new update${
+      validItems.length > 1 ? "s" : ""
+    } • Latest: ${formattedDate}`;
+
+    // Build list widgets using DecoratedText for better formatting
+    const listWidgets = validItems.map((item) => {
+      const title = item.title || "Untitled";
+      const link = item.link || "#";
+      const itemDate = item.isoDate || item.pubDate;
+      const formattedItemDate = formatDate(itemDate);
+
+      return {
+        decoratedText: {
+          startIcon: {
+            knownIcon: "BOOKMARK",
+          },
+          text: `<a href="${link}"><b>${title}</b></a><br><font color="#5f6368">${formattedItemDate}</font>`,
+        },
+      };
+    });
+
+    // Build a single card with all updates
+    const cardMessage = {
+      cardsV2: [
+        {
+          card: {
+            header: {
+              title: "Shopify Changelog Updates",
+              subtitle: dateSubtitle,
+              imageUrl: getImageUrl(),
+            },
+            sections: [
+              {
+                widgets: listWidgets,
+              },
+            ],
+          },
+        },
+      ],
+      accessoryWidgets: [
+        {
+          buttonList: {
+            buttons: [
+              {
+                text: "View All Changelogs",
+                icon: { materialIcon: { name: "open_in_new" } },
+                onClick: {
+                  openLink: {
+                    url: "https://shopify.dev/changelog",
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    // Send to Google Chat
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(cardMessage),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(
+        `Failed to send updates to Gchat:`,
+        response.statusText,
+        errorText
+      );
+      throw new Error(
+        `Failed to send to Gchat: ${response.statusText} - ${errorText}`
+      );
+    }
+
+    const result = await response.json();
+    console.log(
+      `Successfully sent ${validItems.length} update(s) to Google Chat`
+    );
+  } catch (error) {
+    console.error(`Error sending updates to Gchat:`, error);
+    throw error;
+  }
+}
+```
+
+### Example Usage
+
+```typescript
+const newItems = [
+  {
+    title: "New API endpoint for products",
+    link: "https://shopify.dev/changelog/new-api",
+    isoDate: "2026-02-28T10:00:00.000Z"
+  },
+  {
+    title: "GraphQL schema update",
+    link: "https://shopify.dev/changelog/graphql-update",
+    isoDate: "2026-02-27T15:30:00.000Z"
+  }
+];
+
+await sendToGchat(newItems);
+// Console: "Successfully sent 2 update(s) to Google Chat"
+```
+
+### Example Google Chat Card Output
+
+<Accordion title="Card Message Structure">
+
+```json
+{
+  "cardsV2": [{
+    "card": {
+      "header": {
+        "title": "Shopify Changelog Updates",
+        "subtitle": "2 new updates • Latest: February 28, 2026",
+        "imageUrl": "https://lh6.googleusercontent.com/..."
+      },
+      "sections": [{
+        "widgets": [
+          {
+            "decoratedText": {
+              "startIcon": { "knownIcon": "BOOKMARK" },
+              "text": "<a href='...'><b>New API endpoint for products</b></a><br><font color='#5f6368'>February 28, 2026</font>"
+            }
+          },
+          {
+            "decoratedText": {
+              "startIcon": { "knownIcon": "BOOKMARK" },
+              "text": "<a href='...'><b>GraphQL schema update</b></a><br><font color='#5f6368'>February 27, 2026</font>"
+            }
+          }
+        ]
+      }]
+    }
+  }],
+  "accessoryWidgets": [{
+    "buttonList": {
+      "buttons": [{
+        "text": "View All Changelogs",
+        "icon": { "materialIcon": { "name": "open_in_new" } },
+        "onClick": {
+          "openLink": { "url": "https://shopify.dev/changelog" }
+        }
+      }]
+    }
+  }]
+}
+```
+
+</Accordion>
+
+---
+
+## Helper Functions
+
+The module includes several helper functions used by the main API.
+
+### formatDate()
+
+Formats ISO date strings into readable format.
+
+```typescript rss-handler.ts (lines 88-105)
+function formatDate(dateString?: string): string {
+  if (!dateString) return "Unknown date";
+
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      return dateString;
+    }
+
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  } catch (error) {
+    return dateString;
+  }
+}
+```
+
+**Example:**
+```typescript
+formatDate("2026-02-28T10:00:00.000Z") // "February 28, 2026"
+formatDate(undefined) // "Unknown date"
+```
+
+### getImageUrl()
+
+Returns the Shopify logo URL for Google Chat cards.
+
+```typescript rss-handler.ts (lines 110-113)
+function getImageUrl(): string {
+  // Try Shopify logo first, fallback to placeholder
+  return PLACEHOLDER_IMAGE;
+}
+```
+
+### getProcessedState()
+
+Retrieves the last processed date state (defaults to yesterday).
+
+```typescript rss-handler.ts (lines 19-22)
+async function getProcessedState(): Promise<ProcessedState> {
+  // Initialize with yesterday's date
+  return { lastProcessedDate: getYesterdayDate() };
+}
+```
+
+### getYesterdayDate()
+
+Calculates yesterday's date at 00:00:00 in ISO format.
+
+```typescript rss-handler.ts (lines 12-17)
+function getYesterdayDate(): string {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(0, 0, 0, 0);
+  return yesterday.toISOString();
+}
+```
+
+---
+
+## Type Definitions
+
+### ProcessedState
+
+```typescript rss-handler.ts (lines 8-10)
+interface ProcessedState {
+  lastProcessedDate: string;
+}
+```
+
+Stores the timestamp of the last processed RSS item.

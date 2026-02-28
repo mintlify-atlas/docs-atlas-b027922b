@@ -1,0 +1,604 @@
+---
+title: Deployment Guide
+description: Deploy your Shopify RSS Feed to Google Chat service on Vercel with automated cron scheduling
+icon: rocket
+---
+
+## Overview
+
+The Shopify RSS Feed to Google Chat service is designed to run as a serverless function with scheduled cron jobs. This guide covers deployment to Vercel, which provides native support for cron-triggered functions.
+
+<Note>
+  The service uses Vercel's cron functionality to automatically check for Shopify changelog updates daily at midnight UTC.
+</Note>
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+<Steps>
+  <Step title="Google Chat Webhook">
+    A Google Chat webhook URL where updates will be sent. See [Environment Variables](/configuration/environment-variables) for setup instructions.
+  </Step>
+  
+  <Step title="Vercel Account">
+    A free or paid Vercel account at [vercel.com](https://vercel.com)
+  </Step>
+  
+  <Step title="GitHub Repository">
+    Your code pushed to a GitHub, GitLab, or Bitbucket repository (recommended for automatic deployments)
+  </Step>
+</Steps>
+
+## Cron Schedule Configuration
+
+The service is configured to run on a daily schedule using Vercel's cron jobs feature.
+
+### Current Configuration
+
+From `vercel.json`:
+```json
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/get-rss-feed",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
+```
+
+### Schedule Breakdown
+
+<ParamField path="schedule" type="string" default="0 0 * * *">
+  The cron expression that defines when the job runs.
+  
+  **Current Schedule:** `0 0 * * *`
+  - Runs **daily at midnight UTC** (00:00)
+  - Checks for new Shopify changelog entries
+  - Sends updates to Google Chat if new items are found
+  
+  **Cron Expression Format:**
+  ```
+  ┌───────────── minute (0 - 59)
+  │ ┌───────────── hour (0 - 23)
+  │ │ ┌───────────── day of month (1 - 31)
+  │ │ │ ┌───────────── month (1 - 12)
+  │ │ │ │ ┌───────────── day of week (0 - 6) (Sunday to Saturday)
+  │ │ │ │ │
+  0 0 * * *
+  ```
+</ParamField>
+
+<ParamField path="path" type="string" default="/get-rss-feed">
+  The API endpoint that Vercel will call when the cron job triggers.
+  
+  This path is defined in `server.ts:10-13`:
+  ```typescript
+  app.get("/get-rss-feed", async (c) => {
+    await handleRSSFeed();
+    return c.text("Done!", 200);
+  });
+  ```
+</ParamField>
+
+### Custom Schedule Examples
+
+To modify the schedule, update `vercel.json` with a different cron expression:
+
+<Tabs>
+  <Tab title="Every 6 Hours">
+    Check for updates four times per day:
+    ```json
+    {
+      "schedule": "0 */6 * * *"
+    }
+    ```
+    Runs at: 00:00, 06:00, 12:00, 18:00 UTC
+  </Tab>
+  
+  <Tab title="Twice Daily">
+    Morning and evening updates:
+    ```json
+    {
+      "schedule": "0 9,21 * * *"
+    }
+    ```
+    Runs at: 09:00 and 21:00 UTC
+  </Tab>
+  
+  <Tab title="Weekdays Only">
+    Business days during work hours:
+    ```json
+    {
+      "schedule": "0 9 * * 1-5"
+    }
+    ```
+    Runs at: 09:00 UTC, Monday through Friday
+  </Tab>
+  
+  <Tab title="Every Hour">
+    Frequent updates (may be excessive):
+    ```json
+    {
+      "schedule": "0 * * * *"
+    }
+    ```
+    Runs at: Every hour on the hour
+  </Tab>
+</Tabs>
+
+<Warning>
+  Vercel's cron jobs are limited based on your plan:
+  - **Hobby:** Maximum 1 cron per day
+  - **Pro:** Up to 100 crons per day
+  - **Enterprise:** Custom limits
+  
+  Verify your plan supports your desired schedule frequency.
+</Warning>
+
+## Deploy to Vercel
+
+### Option 1: Deploy with GitHub (Recommended)
+
+<Steps>
+  <Step title="Push code to GitHub">
+    Ensure your code is in a GitHub repository:
+    ```bash
+    git init
+    git add .
+    git commit -m "Initial commit"
+    git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
+    git push -u origin main
+    ```
+  </Step>
+  
+  <Step title="Import project to Vercel">
+    1. Log in to [vercel.com](https://vercel.com)
+    2. Click **Add New** → **Project**
+    3. Import your GitHub repository
+    4. Select the repository containing your code
+  </Step>
+  
+  <Step title="Configure environment variables">
+    In the import configuration screen:
+    1. Expand **Environment Variables**
+    2. Add `WEBHOOK_URL` with your Google Chat webhook URL
+    3. Select **Production**, **Preview**, and **Development** environments
+    
+    <Warning>
+      Do not skip this step. The deployment will fail without `WEBHOOK_URL`.
+    </Warning>
+  </Step>
+  
+  <Step title="Configure build settings">
+    Vercel should automatically detect the project settings:
+    - **Framework Preset:** Other
+    - **Build Command:** (leave empty or use `bun install`)
+    - **Output Directory:** (leave empty)
+    - **Install Command:** `bun install`
+    
+    <Note>
+      If Bun is not detected, you may need to specify the Node.js version or install command manually.
+    </Note>
+  </Step>
+  
+  <Step title="Deploy">
+    Click **Deploy** and wait for the build to complete.
+    
+    Vercel will:
+    1. Install dependencies with `bun install`
+    2. Build and deploy the serverless function
+    3. Register the cron job from `vercel.json`
+  </Step>
+</Steps>
+
+### Option 2: Deploy with Vercel CLI
+
+<Steps>
+  <Step title="Install Vercel CLI">
+    ```bash
+    npm install -g vercel
+    # or with bun
+    bun install -g vercel
+    ```
+  </Step>
+  
+  <Step title="Login to Vercel">
+    ```bash
+    vercel login
+    ```
+  </Step>
+  
+  <Step title="Set environment variables">
+    ```bash
+    vercel env add WEBHOOK_URL production
+    ```
+    
+    When prompted, paste your Google Chat webhook URL.
+    
+    Repeat for preview and development environments:
+    ```bash
+    vercel env add WEBHOOK_URL preview
+    vercel env add WEBHOOK_URL development
+    ```
+  </Step>
+  
+  <Step title="Deploy to production">
+    ```bash
+    vercel --prod
+    ```
+    
+    The CLI will:
+    - Link your project (or create a new one)
+    - Upload your code
+    - Install dependencies
+    - Deploy the function
+    - Register cron jobs
+  </Step>
+</Steps>
+
+### Option 3: One-Click Deploy Button
+
+Add a deploy button to your README.md for easy deployment:
+
+```markdown
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/YOUR_REPO&env=WEBHOOK_URL&envDescription=Google%20Chat%20webhook%20URL%20for%20receiving%20updates&envLink=https://developers.google.com/chat/how-tos/webhooks)
+```
+
+<Note>
+  Replace `YOUR_USERNAME/YOUR_REPO` with your actual GitHub repository path.
+</Note>
+
+When users click this button, Vercel will:
+1. Clone the repository to their account
+2. Prompt for the `WEBHOOK_URL` environment variable
+3. Deploy the service automatically
+
+## Project Structure
+
+The deployment includes these key files:
+
+```
+.
+├── server.ts           # Hono server with endpoints
+├── rss-handler.ts      # RSS parsing and Google Chat integration
+├── vercel.json         # Cron job configuration
+├── package.json        # Dependencies and metadata
+└── tsconfig.json       # TypeScript configuration
+```
+
+### Server Configuration
+
+From `server.ts`:
+```typescript
+import { Hono } from "hono";
+import { handleRSSFeed } from "./rss-handler.js";
+
+const app = new Hono();
+
+app.get("/healthcheck", (c) => {
+  return c.text("Running!");
+});
+
+app.get("/get-rss-feed", async (c) => {
+  await handleRSSFeed();
+  return c.text("Done!", 200);
+});
+
+export default app;
+```
+
+**Available Endpoints:**
+- `/healthcheck` - Returns "Running!" to verify the service is alive
+- `/get-rss-feed` - Triggered by cron to check for and send updates
+
+## Verifying Deployment
+
+### Check Deployment Status
+
+<Steps>
+  <Step title="View deployment logs">
+    1. Open your Vercel dashboard
+    2. Navigate to your project
+    3. Click on the latest deployment
+    4. View the **Deployment Logs** tab
+    
+    Look for successful build messages:
+    ```
+    ✓ Build completed successfully
+    ✓ Serverless Functions deployed
+    ✓ Cron jobs registered
+    ```
+  </Step>
+  
+  <Step title="Test the healthcheck endpoint">
+    Verify the service is running:
+    ```bash
+    curl https://your-project.vercel.app/healthcheck
+    ```
+    
+    Expected response:
+    ```
+    Running!
+    ```
+  </Step>
+  
+  <Step title="Manually trigger the cron">
+    Test the RSS feed endpoint manually:
+    ```bash
+    curl https://your-project.vercel.app/get-rss-feed
+    ```
+    
+    Expected response:
+    ```
+    Done!
+    ```
+    
+    Check your Google Chat space for incoming messages.
+  </Step>
+  
+  <Step title="Verify cron registration">
+    1. Go to **Settings** → **Crons** in your Vercel project
+    2. Confirm the cron job is listed:
+       - **Path:** `/get-rss-feed`
+       - **Schedule:** `0 0 * * *`
+       - **Status:** Active
+  </Step>
+</Steps>
+
+### Monitor Cron Executions
+
+<Note>
+  Cron jobs on Vercel run automatically at the scheduled time. You cannot manually trigger them through the dashboard.
+</Note>
+
+To monitor cron executions:
+
+1. Navigate to **Logs** in your Vercel project
+2. Filter by function: `/get-rss-feed`
+3. Look for execution logs around midnight UTC daily
+
+Expected log output:
+```
+Successfully sent 3 update(s) to Google Chat
+```
+
+Or if no new items:
+```
+No new items to process
+```
+
+## Environment-Specific Deployments
+
+### Production
+
+Production deployments use the `main` or `master` branch and production environment variables.
+
+```bash
+vercel --prod
+```
+
+Cron jobs only run on **production deployments**, not preview deployments.
+
+### Preview (Staging)
+
+Preview deployments are created for non-production branches:
+
+```bash
+vercel
+```
+
+<Warning>
+  Cron jobs do **not** trigger on preview deployments. Only production deployments execute scheduled crons.
+</Warning>
+
+### Development
+
+Local development uses the `.env` file for environment variables:
+
+```bash
+bun run dev
+```
+
+Access locally at:
+- Healthcheck: `http://localhost:3000/healthcheck`
+- RSS Feed: `http://localhost:3000/get-rss-feed`
+
+## Updating Environment Variables
+
+To update environment variables after deployment:
+
+<Steps>
+  <Step title="Open project settings">
+    Navigate to **Settings** → **Environment Variables** in Vercel dashboard
+  </Step>
+  
+  <Step title="Edit variable">
+    1. Find `WEBHOOK_URL`
+    2. Click **Edit**
+    3. Update the value
+    4. Select environments (Production, Preview, Development)
+    5. Click **Save**
+  </Step>
+  
+  <Step title="Redeploy">
+    Environment variable changes require a redeployment:
+    
+    **Option A:** Trigger via Dashboard
+    - Go to **Deployments**
+    - Click **...** on latest deployment
+    - Select **Redeploy**
+    
+    **Option B:** Trigger via Git
+    ```bash
+    git commit --allow-empty -m "Redeploy to update env vars"
+    git push
+    ```
+    
+    **Option C:** Trigger via CLI
+    ```bash
+    vercel --prod --force
+    ```
+  </Step>
+</Steps>
+
+## Rollback and Version Control
+
+### Rollback to Previous Deployment
+
+If a deployment fails or causes issues:
+
+<Steps>
+  <Step title="View deployment history">
+    Navigate to **Deployments** in your Vercel dashboard
+  </Step>
+  
+  <Step title="Select previous deployment">
+    Click on a previous successful deployment
+  </Step>
+  
+  <Step title="Promote to production">
+    Click **Promote to Production**
+    
+    This instantly rolls back to the selected deployment without rebuilding.
+  </Step>
+</Steps>
+
+### Git-Based Rollback
+
+```bash
+# Revert to a previous commit
+git revert HEAD
+git push
+
+# Or reset to a specific commit
+git reset --hard <commit-hash>
+git push --force
+```
+
+<Warning>
+  Be cautious with `git push --force` as it rewrites history. Coordinate with your team before force pushing.
+</Warning>
+
+## Troubleshooting
+
+### Cron job not executing
+
+**Symptoms:**
+- No logs appearing at scheduled time
+- Google Chat not receiving updates
+
+**Solutions:**
+1. Verify cron is registered in **Settings** → **Crons**
+2. Ensure deployment is in **production** (preview deployments don't run crons)
+3. Check that `vercel.json` is in the project root
+4. Review cron syntax is valid (use [crontab.guru](https://crontab.guru) to verify)
+
+### Build failures
+
+**Common causes:**
+- Missing dependencies in `package.json`
+- TypeScript compilation errors
+- Missing environment variables during build
+
+**Solutions:**
+1. Review build logs in Vercel dashboard
+2. Test build locally: `bun run build` (if build script exists)
+3. Ensure all imports use `.js` extensions for Bun compatibility
+4. Verify TypeScript configuration in `tsconfig.json`
+
+### Function timeout
+
+**Symptoms:**
+- Deployment logs show timeout errors
+- 504 Gateway Timeout responses
+
+**Solutions:**
+1. Optimize RSS parsing logic
+2. Add timeout configuration to `vercel.json`:
+   ```json
+   {
+     "functions": {
+       "api/**/*.ts": {
+         "maxDuration": 60
+       }
+     }
+   }
+   ```
+3. Consider upgrading to Vercel Pro for longer execution limits
+
+### Environment variables not loading
+
+**Symptoms:**
+- Error: "WEBHOOK_URL environment variable is not set"
+- Variables work locally but not in production
+
+**Solutions:**
+1. Verify variables are set in **Settings** → **Environment Variables**
+2. Ensure correct environment (Production/Preview/Development) is selected
+3. Redeploy after adding variables
+4. Check variable names match exactly (case-sensitive)
+
+## Cost Considerations
+
+### Vercel Hobby Plan (Free)
+
+- **Executions:** Unlimited
+- **Execution Duration:** 10 seconds per function
+- **Bandwidth:** 100 GB/month
+- **Cron Jobs:** Limited to daily frequency
+
+The default configuration (daily at midnight) fits within the free tier.
+
+### Vercel Pro Plan
+
+If you need more frequent updates:
+- **Execution Duration:** 60 seconds per function
+- **Bandwidth:** 1 TB/month
+- **Cron Jobs:** Up to 100 per day
+- **Cost:** $20/month per member
+
+<Note>
+  For this lightweight RSS service, the free Hobby plan is typically sufficient unless you need more frequent update checks.
+</Note>
+
+## Security Best Practices
+
+<Warning>
+  Follow these security guidelines for production deployments:
+</Warning>
+
+1. **Protect Environment Variables**
+   - Never commit `.env` files to Git
+   - Add `.env` to `.gitignore`
+   - Use Vercel's encrypted environment variable storage
+
+2. **Webhook Security**
+   - Keep webhook URLs private
+   - Rotate webhooks periodically
+   - Monitor webhook usage in Google Chat
+
+3. **Access Control**
+   - Limit who can access your Vercel project
+   - Use Vercel Teams for shared projects
+   - Enable two-factor authentication on your Vercel account
+
+4. **Monitoring**
+   - Set up alerts for deployment failures
+   - Monitor function execution logs
+   - Track error rates and investigate anomalies
+
+## Next Steps
+
+After successful deployment:
+
+1. Monitor your Google Chat space for incoming Shopify changelog updates
+2. Adjust the cron schedule if needed based on your team's preferences
+3. Customize the message format in `rss-handler.ts` for your needs
+4. Set up deployment notifications in Vercel (Settings → Notifications)
+
+<Note>
+  The first cron execution will happen at the next scheduled time (midnight UTC by default). You can manually trigger `/get-rss-feed` to test immediately.
+</Note>

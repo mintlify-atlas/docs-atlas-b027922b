@@ -1,0 +1,341 @@
+---
+title: 'Testing Guide'
+description: 'Learn how to test the Shopify RSS Feed to Google Chat service locally'
+---
+
+## Overview
+
+This guide covers testing strategies for both the RSS feed handler and Google Chat webhook integration during local development.
+
+## Testing the Healthcheck Endpoint
+
+Verify that your server is running correctly:
+
+<CodeGroup>
+```bash curl
+curl http://localhost:3000/healthcheck
+```
+
+```bash HTTPie
+http GET http://localhost:3000/healthcheck
+```
+
+```bash wget
+wget -qO- http://localhost:3000/healthcheck
+```
+</CodeGroup>
+
+**Expected Response:**
+```
+Running!
+```
+
+## Testing the RSS Feed Handler
+
+The main endpoint processes the Shopify changelog feed and sends updates to Google Chat.
+
+### Basic Test
+
+Trigger the RSS feed handler:
+
+```bash
+curl http://localhost:3000/get-rss-feed
+```
+
+**Expected Response:**
+```
+Done!
+```
+
+<Note>
+  This will actually send messages to your configured Google Chat webhook if there are new items.
+</Note>
+
+### With Verbose Output
+
+To see detailed console logs during testing:
+
+<Steps>
+  <Step title="Start the dev server">
+    ```bash
+    bun run dev
+    ```
+  </Step>
+
+  <Step title="Trigger the endpoint in another terminal">
+    ```bash
+    curl http://localhost:3000/get-rss-feed
+    ```
+  </Step>
+
+  <Step title="Check the server logs">
+    Look for console output in your dev server terminal:
+    - "No new items to process" - No updates found
+    - "Successfully sent X update(s) to Google Chat" - Messages sent
+    - Error messages if something went wrong
+  </Step>
+</Steps>
+
+## Testing Google Chat Webhook Integration
+
+### Prerequisites
+
+Ensure you have:
+1. A valid Google Chat webhook URL in your `.env` file
+2. The dev server running (`bun run dev`)
+
+### Test Message Sending
+
+<Steps>
+  <Step title="Trigger the RSS feed endpoint">
+    ```bash
+    curl http://localhost:3000/get-rss-feed
+    ```
+  </Step>
+
+  <Step title="Check Google Chat">
+    Open your Google Chat space and verify:
+    - A card message appears with "Shopify Changelog Updates"
+    - The card shows a list of recent updates
+    - Each update has a title, date, and clickable link
+    - An "View All Changelogs" button is present
+  </Step>
+</Steps>
+
+### Test Webhook URL Validity
+
+Verify your webhook URL works independently:
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Test message from local development"
+  }' \
+  $WEBHOOK_URL
+```
+
+<Tip>
+  Replace `$WEBHOOK_URL` with your actual webhook URL, or use `source .env && curl ...` to load the variable.
+</Tip>
+
+## Testing RSS Feed Parsing
+
+### Manual Feed Inspection
+
+Test what the RSS parser returns:
+
+<Steps>
+  <Step title="Create a test script">
+    Create `test-rss.ts`:
+    
+    ```typescript test-rss.ts
+    import Parser from "rss-parser";
+    
+    const parser = new Parser();
+    const RSS_FEED_URL = "https://shopify.dev/changelog/feed.xml";
+    
+    const feed = await parser.parseURL(RSS_FEED_URL);
+    
+    console.log("Feed Title:", feed.title);
+    console.log("Total Items:", feed.items.length);
+    console.log("\nFirst 5 items:");
+    
+    feed.items.slice(0, 5).forEach((item, index) => {
+      console.log(`${index + 1}. ${item.title}`);
+      console.log(`   Date: ${item.isoDate || item.pubDate}`);
+      console.log(`   Link: ${item.link}`);
+      console.log("");
+    });
+    ```
+  </Step>
+
+  <Step title="Run the test script">
+    ```bash
+    bun run test-rss.ts
+    ```
+  </Step>
+</Steps>
+
+### Test Date Filtering Logic
+
+The handler only processes items newer than yesterday. To test this:
+
+1. Check the filtering logic in `rss-handler.ts:40-64`
+2. The `getYesterdayDate()` function returns yesterday at midnight
+3. Items are filtered based on their `isoDate` or `pubDate`
+
+<Accordion title="Understanding Date Filtering">
+  The service uses the following logic:
+  
+  - **Initial Run**: Processes items from yesterday onwards (prevents sending old items)
+  - **Subsequent Runs**: Would process items newer than the last processed date (in production with state persistence)
+  - **Current Implementation**: Always starts from yesterday for each run
+  
+  To test with different dates, modify the `getProcessedState()` function in `rss-handler.ts:19-22`.
+</Accordion>
+
+## Testing Error Handling
+
+### Missing Webhook URL
+
+Test behavior when `WEBHOOK_URL` is not set:
+
+<Steps>
+  <Step title="Remove or comment out WEBHOOK_URL in .env">
+    ```bash .env
+    # WEBHOOK_URL=...
+    ```
+  </Step>
+
+  <Step title="Restart the server">
+    ```bash
+    bun run dev
+    ```
+  </Step>
+
+  <Step title="Trigger the endpoint">
+    ```bash
+    curl http://localhost:3000/get-rss-feed
+    ```
+  </Step>
+
+  <Step title="Check for error">
+    Server logs should show:
+    ```
+    Error: WEBHOOK_URL environment variable is not set
+    ```
+  </Step>
+</Steps>
+
+### Invalid Webhook URL
+
+Test with an invalid webhook URL:
+
+```bash
+WEBHOOK_URL=https://invalid-webhook-url.com bun run dev
+```
+
+Then trigger the endpoint. Server logs should show:
+```
+Failed to send updates to Gchat: [error details]
+```
+
+## Debugging Tips
+
+### Enable Detailed Logging
+
+Add console logs to track the flow:
+
+```typescript
+// In rss-handler.ts
+console.log("Feed fetched:", feed.items.length, "items");
+console.log("Filtered items:", newItems.length);
+console.log("Items to send:", newItems.map(i => i.title));
+```
+
+### Inspect Card Message Structure
+
+Before sending to Google Chat, log the card structure:
+
+```typescript
+// In sendToGchat function (rss-handler.ts:115)
+console.log("Card message:", JSON.stringify(cardMessage, null, 2));
+```
+
+### Check Network Requests
+
+Use curl's verbose mode to see full request/response:
+
+```bash
+curl -v http://localhost:3000/get-rss-feed
+```
+
+### Test with Different RSS Feeds
+
+Temporarily modify the `RSS_FEED_URL` in `rss-handler.ts:4` to test with other feeds:
+
+```typescript
+const RSS_FEED_URL = "https://example.com/feed.xml";
+```
+
+## Using Bun's Test Runner
+
+While the project doesn't currently have test files, you can add them:
+
+<Steps>
+  <Step title="Create a test file">
+    ```typescript server.test.ts
+    import { test, expect } from "bun:test";
+    import app from "./server";
+    
+    test("healthcheck returns 200", async () => {
+      const req = new Request("http://localhost/healthcheck");
+      const res = await app.fetch(req);
+      
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("Running!");
+    });
+    ```
+  </Step>
+
+  <Step title="Run tests">
+    ```bash
+    bun test
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  Bun's test runner is built-in and compatible with Jest-style syntax.
+</Tip>
+
+## Common Testing Scenarios
+
+<Accordion title="No new items to process">
+  **Scenario**: RSS feed has no items newer than yesterday.
+  
+  **Expected**: Console shows "No new items to process", no Google Chat message sent.
+  
+  **How to Test**: Run the endpoint multiple times within the same day.
+</Accordion>
+
+<Accordion title="Multiple new items">
+  **Scenario**: RSS feed has several new items.
+  
+  **Expected**: Single card message with all items listed, newest first.
+  
+  **How to Test**: Modify `getYesterdayDate()` to return a date further in the past.
+</Accordion>
+
+<Accordion title="RSS feed is unavailable">
+  **Scenario**: Shopify's RSS feed is down or unreachable.
+  
+  **Expected**: Error thrown and logged.
+  
+  **How to Test**: Temporarily change `RSS_FEED_URL` to an invalid URL.
+</Accordion>
+
+## Testing in Production-like Environment
+
+To test the cron functionality locally:
+
+<Note>
+  Vercel cron jobs run in production. For local testing, manually trigger the endpoint or use a tool like `cron` on your machine.
+</Note>
+
+### Simulating Cron Execution
+
+```bash
+# Run once (simulates single cron execution)
+curl http://localhost:3000/get-rss-feed
+
+# Run on a schedule using watch (every 60 seconds)
+watch -n 60 curl -s http://localhost:3000/get-rss-feed
+```
+
+## Next Steps
+
+- Review the [API Reference](/api/endpoints) for detailed endpoint documentation
+- Learn about [RSS Handler internals](/api/rss-handler)
+- Deploy to [Vercel](/configuration/deployment) for production testing

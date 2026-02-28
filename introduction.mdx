@@ -1,0 +1,88 @@
+---
+title: Shopify RSS Feed to Google Chat
+description: Automated Shopify changelog monitoring service that sends updates directly to Google Chat
+---
+
+# Shopify RSS Feed to Google Chat
+
+Stay up-to-date with Shopify's latest developer updates without constantly checking the changelog. This service automatically monitors the Shopify Developer Changelog RSS feed and sends formatted notifications to your Google Chat space.
+
+## What This Service Does
+
+This lightweight service fetches the [Shopify Developer Changelog](https://shopify.dev/changelog/feed.xml), filters for new entries, and delivers beautifully formatted card notifications to Google Chat. Built with Bun and Hono for blazing-fast performance, it runs on a scheduled cron job to keep your team informed about API changes, new features, deprecations, and breaking changes.
+
+<CardGroup cols={2}>
+  <Card title="RSS Feed Monitoring" icon="rss">
+    Automatically fetches and parses the Shopify Developer Changelog RSS feed to detect new updates
+  </Card>
+  
+  <Card title="Google Chat Integration" icon="message">
+    Sends rich card notifications with titles, dates, links, and formatted content directly to your chat space
+  </Card>
+  
+  <Card title="Automated Scheduling" icon="clock">
+    Runs on a daily cron schedule (midnight UTC) via Vercel to check for new changelog entries
+  </Card>
+  
+  <Card title="Bun + Hono Stack" icon="rocket">
+    Built with Bun for fast JavaScript runtime and Hono for lightweight HTTP routing with minimal overhead
+  </Card>
+</CardGroup>
+
+## How It Works
+
+The service operates through a simple yet effective workflow:
+
+<Steps>
+  <Step title="Scheduled Trigger">
+    A Vercel cron job triggers the `/get-rss-feed` endpoint daily at midnight UTC
+  </Step>
+  
+  <Step title="Fetch & Parse">
+    The service fetches the Shopify changelog RSS feed and parses it using `rss-parser`
+  </Step>
+  
+  <Step title="Filter New Items">
+    Compares feed items against the last processed date to identify new changelog entries published since yesterday
+  </Step>
+  
+  <Step title="Format & Send">
+    Formats new items into Google Chat cards with titles, dates, links, and sends them via webhook
+  </Step>
+</Steps>
+
+## Key Features
+
+### Smart Filtering
+The service maintains state to track the last processed date, ensuring you only receive notifications for genuinely new changelog entries. It initializes with yesterday's date and updates after each successful run.
+
+### Rich Notifications
+Each Google Chat message includes:
+- Card header with update count and latest date
+- Individual changelog items with bookmark icons
+- Formatted dates in readable format (e.g., "December 12, 2025")
+- Direct links to full changelog entries
+- Quick access button to view all changelogs
+
+### Production-Ready
+Deployed on Vercel with zero-configuration cron scheduling. The `vercel.json` configuration handles automated daily execution, and environment variables provide secure webhook management.
+
+<Info>
+  The service uses the official Shopify Developer Changelog RSS feed at `https://shopify.dev/changelog/feed.xml`
+</Info>
+
+## Use Cases
+
+- Keep your development team informed about Shopify API changes
+- Monitor deprecation announcements and breaking changes
+- Track new features and platform updates
+- Maintain awareness of API version releases
+- Ensure compliance with Shopify's evolving developer ecosystem
+
+## Next Steps
+
+Ready to set up your own Shopify changelog monitor?
+
+<Card title="Quickstart Guide" icon="play" href="/quickstart">
+  Follow our step-by-step guide to deploy the service in minutes
+</Card>

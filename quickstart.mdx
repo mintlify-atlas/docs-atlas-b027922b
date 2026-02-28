@@ -1,80 +1,345 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get the Shopify RSS Feed to Google Chat service running in minutes
 ---
 
-## Get started in three steps
+# Quickstart Guide
 
-Get your documentation site running locally and make your first customization.
+Get your Shopify changelog monitoring service up and running in just a few steps.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+Before you begin, ensure you have:
+
+- **Bun** installed (v1.3.1 or later) - [Download from bun.sh](https://bun.sh)
+- **Google Chat webhook URL** - [Create an incoming webhook](https://developers.google.com/chat/how-tos/webhooks)
+- **Vercel account** (optional, for deployment) - [Sign up at vercel.com](https://vercel.com)
+
+<Warning>
+  Keep your Google Chat webhook URL secure. Anyone with access to this URL can send messages to your chat space.
+</Warning>
+
+## Installation
+
+<Steps>
+  <Step title="Clone or download the repository">
+    Get the source code on your local machine:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    ```bash
+    git clone <repository-url>
+    cd shopify-rss-feed-gchat
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Use Bun to install the required packages:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    ```bash
+    bun install
+    ```
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    This installs:
+    - `hono` - Fast web framework for routing
+    - `rss-parser` - RSS feed parsing library
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Configure environment variables">
+    Create a `.env` file in the project root:
+    
+    ```bash
+    WEBHOOK_URL=your-google-chat-webhook-url-here
+    ```
+    
+    Replace `your-google-chat-webhook-url-here` with your actual Google Chat webhook URL.
+    
+    <Note>
+      Bun automatically loads `.env` files, so no additional configuration is needed.
+    </Note>
+  </Step>
+</Steps>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+## Running Locally
 
-### Step 3: Go live
+Start the development server with hot reloading:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+```bash
+bun run dev
+```
 
-## Next steps
+The server will start on the default port (typically `http://localhost:3000`).
 
-Now that you have your docs running, explore these key features:
+<Info>
+  The `--hot` flag enables automatic reloading when you modify source files.
+</Info>
 
-<CardGroup cols={2}>
+## Testing the Endpoints
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+### Health Check
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+Verify the server is running:
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+```bash
+curl http://localhost:3000/healthcheck
+```
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+Expected response:
+```
+Running!
+```
 
-</CardGroup>
+### Trigger RSS Feed Check
+
+Manually trigger the RSS feed processing:
+
+```bash
+curl http://localhost:3000/get-rss-feed
+```
+
+Expected response:
+```
+Done!
+```
+
+This endpoint will:
+1. Fetch the Shopify changelog RSS feed
+2. Filter for new items (published after yesterday)
+3. Send formatted notifications to your Google Chat space
+4. Update the last processed date
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  On first run, the service processes items from the last 24 hours. Subsequent runs only process items newer than the last execution.
 </Note>
+
+## Understanding the Code
+
+### Server Setup (server.ts)
+
+The main server file uses Hono for routing:
+
+```typescript server.ts
+import { Hono } from "hono";
+import { handleRSSFeed } from "./rss-handler.js";
+
+const app = new Hono();
+
+app.get("/healthcheck", (c) => {
+  return c.text("Running!");
+});
+
+app.get("/get-rss-feed", async (c) => {
+  await handleRSSFeed();
+  return c.text("Done!", 200);
+});
+
+export default app;
+```
+
+### RSS Handler (rss-handler.ts)
+
+The core logic handles feed fetching, filtering, and Google Chat integration:
+
+```typescript rss-handler.ts
+export async function handleRSSFeed() {
+  const feed = await getRSSFeed();
+  const newItems = await filterNewItems(feed);
+
+  if (newItems.length > 0) {
+    await sendToGchat(newItems);
+    await updateProcessedState(newItems);
+  } else {
+    console.log("No new items to process");
+  }
+}
+```
+
+#### Fetching the RSS Feed
+
+```typescript rss-handler.ts
+const RSS_FEED_URL = "https://shopify.dev/changelog/feed.xml";
+
+async function getRSSFeed() {
+  return await parser.parseURL(RSS_FEED_URL);
+}
+```
+
+#### Filtering New Items
+
+The service tracks processed items by date:
+
+```typescript rss-handler.ts
+async function filterNewItems(
+  feed: Awaited<ReturnType<typeof getRSSFeed>>
+): Promise<typeof feed.items> {
+  const state = await getProcessedState();
+  const lastProcessedDate = new Date(state.lastProcessedDate);
+
+  // Filter items that are newer than the last processed date
+  const newItems = feed.items.filter((item) => {
+    const itemDate = item.isoDate || item.pubDate;
+    if (!itemDate) return false;
+
+    const itemDateObj = new Date(itemDate);
+    return itemDateObj > lastProcessedDate;
+  });
+
+  // Sort by date (newest first)
+  newItems.sort((a, b) => {
+    const dateA = new Date(a.isoDate || a.pubDate || 0).getTime();
+    const dateB = new Date(b.isoDate || b.pubDate || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return newItems;
+}
+```
+
+#### Sending to Google Chat
+
+The service formats items as rich cards:
+
+```typescript rss-handler.ts
+async function sendToGchat(
+  items: Awaited<ReturnType<typeof getRSSFeed>>["items"]
+) {
+  const webhookUrl = process.env.WEBHOOK_URL;
+  if (!webhookUrl) {
+    throw new Error("WEBHOOK_URL environment variable is not set");
+  }
+
+  const cardMessage = {
+    cardsV2: [
+      {
+        card: {
+          header: {
+            title: "Shopify Changelog Updates",
+            subtitle: dateSubtitle,
+            imageUrl: getImageUrl(),
+          },
+          sections: [
+            {
+              widgets: listWidgets,
+            },
+          ],
+        },
+      },
+    ],
+  };
+
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(cardMessage),
+  });
+}
+```
+
+## Deploying to Vercel
+
+<Steps>
+  <Step title="Install Vercel CLI (optional)">
+    ```bash
+    bun install -g vercel
+    ```
+  </Step>
+
+  <Step title="Deploy to Vercel">
+    ```bash
+    vercel
+    ```
+    
+    Follow the prompts to link your project and deploy.
+  </Step>
+
+  <Step title="Configure environment variables">
+    In the Vercel dashboard, add your environment variable:
+    
+    ```
+    WEBHOOK_URL=your-google-chat-webhook-url-here
+    ```
+  </Step>
+
+  <Step title="Verify cron configuration">
+    The `vercel.json` file automatically configures a daily cron job:
+    
+    ```json vercel.json
+    {
+      "crons": [
+        {
+          "path": "/get-rss-feed",
+          "schedule": "0 0 * * *"
+        }
+      ]
+    }
+    ```
+    
+    This runs the RSS feed check every day at midnight UTC.
+  </Step>
+</Steps>
+
+## Customization Options
+
+### Change the RSS Feed URL
+
+Modify the `RSS_FEED_URL` constant in `rss-handler.ts`:
+
+```typescript rss-handler.ts
+const RSS_FEED_URL = "https://your-custom-feed.xml";
+```
+
+### Adjust Cron Schedule
+
+Update the schedule in `vercel.json` using cron syntax:
+
+```json vercel.json
+{
+  "crons": [
+    {
+      "path": "/get-rss-feed",
+      "schedule": "0 */6 * * *"  // Every 6 hours
+    }
+  ]
+}
+```
+
+### Customize Message Format
+
+Modify the `sendToGchat` function in `rss-handler.ts` to change card appearance, colors, or structure.
+
+## Troubleshooting
+
+### No messages received
+
+1. Verify your `WEBHOOK_URL` is correct
+2. Check that new items exist in the RSS feed
+3. Review server logs for errors: `console.log` statements in `rss-handler.ts`
+
+### "WEBHOOK_URL environment variable is not set" error
+
+- Ensure `.env` file exists in the project root
+- Verify the variable name is exactly `WEBHOOK_URL`
+- For Vercel deployments, set the environment variable in the dashboard
+
+### Failed to send to Google Chat
+
+- Verify the webhook URL is valid and hasn't been revoked
+- Check Google Chat webhook [status and logs](https://developers.google.com/chat/how-tos/webhooks#verify_webhook_url)
+- Ensure the webhook space still exists
+
+<Warning>
+  If you regenerate your Google Chat webhook, you must update the `WEBHOOK_URL` environment variable.
+</Warning>
+
+## Next Steps
+
+Your Shopify changelog monitoring service is now running! Consider:
+
+- Setting up monitoring and alerting for the Vercel deployment
+- Adding multiple webhook URLs for different chat spaces
+- Implementing persistent state storage (database) for larger deployments
+- Customizing notification formats based on changelog categories
+
+<Card title="View Source Code" icon="code" href="https://github.com/your-repo">
+  Explore the complete source code and contribute improvements
+</Card>

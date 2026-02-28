@@ -1,0 +1,186 @@
+---
+title: 'HTTP Endpoints'
+description: 'API endpoints for the Shopify RSS Feed to Google Chat service'
+---
+
+## Overview
+
+The service exposes two HTTP endpoints built with [Hono](https://hono.dev) framework.
+
+---
+
+## GET /healthcheck
+
+Health check endpoint to verify the service is running.
+
+### Request
+
+<ParamField path="/healthcheck" type="GET">
+  No parameters required
+</ParamField>
+
+### Response
+
+<ResponseField name="response" type="text/plain">
+  Returns "Running!" with HTTP 200 status
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+
+```bash cURL
+curl http://localhost:3000/healthcheck
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:3000/healthcheck');
+const text = await response.text();
+console.log(text); // "Running!"
+```
+
+```python Python
+import requests
+
+response = requests.get('http://localhost:3000/healthcheck')
+print(response.text)  # "Running!"
+```
+
+</CodeGroup>
+
+### Response Example
+
+```
+Running!
+```
+
+### Source Code
+
+```typescript server.ts (lines 6-8)
+app.get("/healthcheck", (c) => {
+  return c.text("Running!");
+});
+```
+
+---
+
+## GET /get-rss-feed
+
+Triggers the RSS feed processing workflow. Fetches the latest Shopify changelog entries, filters for new items, and sends them to Google Chat.
+
+### Request
+
+<ParamField path="/get-rss-feed" type="GET">
+  No parameters required
+</ParamField>
+
+### Response
+
+<ResponseField name="response" type="text/plain">
+  Returns "Done!" with HTTP 200 status after processing completes
+</ResponseField>
+
+### Behavior
+
+This endpoint:
+
+1. Calls `handleRSSFeed()` to orchestrate the entire workflow
+2. Fetches RSS feed from `https://shopify.dev/changelog/feed.xml`
+3. Filters items newer than the last processed date (defaults to yesterday)
+4. Sends new items to Google Chat via webhook (if any exist)
+5. Returns after completion (synchronous processing)
+
+<Accordion title="Environment Variables Required">
+
+<ParamField name="WEBHOOK_URL" type="string" required>
+  Google Chat webhook URL for sending notifications. Must be set or the endpoint will throw an error during the send phase.
+</ParamField>
+
+</Accordion>
+
+### Example
+
+<CodeGroup>
+
+```bash cURL
+curl http://localhost:3000/get-rss-feed
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:3000/get-rss-feed');
+const text = await response.text();
+console.log(text); // "Done!"
+```
+
+```python Python
+import requests
+
+response = requests.get('http://localhost:3000/get-rss-feed')
+print(response.text)  # "Done!"
+```
+
+</CodeGroup>
+
+### Response Example
+
+```
+Done!
+```
+
+### Error Handling
+
+<ResponseField name="Error" type="Error">
+  If `WEBHOOK_URL` is not set, the endpoint will throw:
+  ```
+  Error: WEBHOOK_URL environment variable is not set
+  ```
+</ResponseField>
+
+<ResponseField name="Error" type="Error">
+  If the Google Chat webhook request fails:
+  ```
+  Error: Failed to send to Gchat: {statusText} - {errorText}
+  ```
+</ResponseField>
+
+### Source Code
+
+```typescript server.ts (lines 10-13)
+app.get("/get-rss-feed", async (c) => {
+  await handleRSSFeed();
+  return c.text("Done!", 200);
+});
+```
+
+---
+
+## Server Configuration
+
+The server is built using [Hono](https://hono.dev), a lightweight web framework for the edge.
+
+```typescript server.ts
+import { Hono } from "hono";
+import { handleRSSFeed } from "./rss-handler.js";
+
+const app = new Hono();
+
+// ... endpoints defined above
+
+export default app;
+```
+
+### Running the Server
+
+<Tabs>
+  <Tab title="Bun">
+    ```bash
+    bun run server.ts
+    ```
+  </Tab>
+  <Tab title="Docker">
+    ```bash
+    docker build -t shopify-rss-gchat .
+    docker run -p 3000:3000 -e WEBHOOK_URL=your_webhook_url shopify-rss-gchat
+    ```
+  </Tab>
+</Tabs>
