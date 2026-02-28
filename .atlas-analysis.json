@@ -1,0 +1,56 @@
+{
+  "projectType": "api-service",
+  "projectName": "Shopify RSS Feed to Google Chat",
+  "projectDescription": "A lightweight service that monitors Shopify's changelog RSS feed and sends new updates to Google Chat via webhook.",
+  "theme": "mint",
+  "primaryColor": "#5A67D8",
+  "lightColor": "#7C3AED",
+  "darkColor": "#4C51BF",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "introduction",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Configuration",
+        "pages": [
+          "configuration/environment-variables",
+          "configuration/deployment"
+        ]
+      },
+      {
+        "group": "API Reference",
+        "pages": [
+          "api/endpoints",
+          "api/rss-handler"
+        ]
+      },
+      {
+        "group": "Development",
+        "pages": [
+          "development/local-setup",
+          "development/testing"
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Automated RSS feed monitoring for Shopify changelog",
+    "Google Chat webhook integration with formatted card messages",
+    "Incremental processing to avoid duplicate notifications",
+    "Vercel cron job scheduling for daily updates",
+    "Built with Bun and Hono for fast, lightweight execution"
+  ],
+  "publicApiSurface": [
+    "GET /healthcheck - Health check endpoint",
+    "GET /get-rss-feed - Trigger RSS feed processing",
+    "handleRSSFeed() - Core RSS processing function",
+    "getRSSFeed() - Fetch and parse RSS feed",
+    "filterNewItems() - Filter items newer than last processed date",
+    "sendToGchat() - Send formatted updates to Google Chat"
+  ]
+}
